@@ -1,0 +1,24 @@
+ и Свойства набора данных для текстовых файлов, в противном случае см. Свойства файлов.
+
+Текстовый файл возвращает dataType, равный "TextFile".
+
+Пример кода
+Пример свойств текстового файла (автономный скрипт)
+Следующий автономный скрипт демонстрирует свойства текстового файла для текстового файла с табличными данными.
+
+import arcpy
+
+# Create a Describe object from the text file.
+#
+desc = arcpy.Describe("C:/data/evac_table.txt")
+
+# Print some table properties
+#
+print("HasOID: " + str(desc.hasOID))
+
+print("\nField names:")
+for field in desc.fields:
+    print("   " + field.name)
+{
+    some new text
+}

@@ -1,0 +1,12 @@
+You can use Qt Creator to create applications for several platforms by using several technologies. The tutorials in this manual explain how to create some basic applications.
+
+Creating a Qt Quick Application
+Learn how to use the Design mode to create a Qt Quick application.
+
+Creating a Qt Widget Based Application
+Learn how to create a Qt widget based application for the desktop.
+
+Creating a Mobile Application
+Learn how to create a Qt Quick application using Qt Quick Controls 2 for Android and iOS devices.
+
+
