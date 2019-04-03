@@ -2,6 +2,6 @@
 
 exit_code=$1
 
-echo -e '\ti just return exit-code\n'
+echo -e '\ti just return exit-code'
 
 exit $exit_code
