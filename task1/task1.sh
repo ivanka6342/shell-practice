@@ -16,5 +16,6 @@ do
     echo -e "\nPy-code execution result(arg = $3):"
     python3 ${scriptsDir}/${pyScript} ${3}
 
+    echo "-----------------------------------"
     shift
 done
