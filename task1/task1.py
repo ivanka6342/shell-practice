@@ -6,7 +6,7 @@ length = int(sys.argv[1])
 
 if length < 0:
     print("py_f: %d is incorrect argument\n" % length)
-    sys.exit(0)
+    sys.exit(-1)
 
 string = "".zfill(length)
 

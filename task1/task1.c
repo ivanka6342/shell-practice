@@ -9,8 +9,10 @@
 #include <stdlib.h>
 #include <stdbool.h> 
 
-void f_v1(int length, char* str)
+char* f_v1(int length)
 {
+    static char str[150];
+
     int num = 0, zeroCount = 0, i = 0;
     bool flagNum = true;
 
@@ -18,22 +20,21 @@ void f_v1(int length, char* str)
     {
         if(!flagNum)
         {
-            str[i] = '0';
-            i++;
+            str[i++] = '0';
             zeroCount++;
             if (zeroCount == num)
                 flagNum = true;
         }
         else
         {
-            sprintf(str+i, "%d", num+1);
-            num++;
-            i++;
+            sprintf(str+i++, "%d", 1+num++);
             flagNum = false;
             zeroCount = 0;
         }
     }
     str[i] = '\0';
+
+    return str;
 }
 
 void f_v2(int n)
@@ -71,12 +72,13 @@ void f_v2(int n)
 int main(int argc, char* argv[])
 {
     int n = atoi(argv[1]);
+    if (n < 0)
+    {
+        printf("Error: %d is incorrect argument\n", n);
+        exit(-1);
+    }
 
-    char* str = (char*)malloc(n*sizeof(char)+1);
-    f_v1(n, str);
-    printf("f_v1(%d) -> \"%s\"\n", n, str);
-    free(str);
-    
+    printf("f_v1(%d) -> \"%s\"\n", n, f_v1(n));    
     f_v2(n);
 
     return 0;
