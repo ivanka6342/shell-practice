@@ -8,78 +8,56 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h> 
+#include <string.h>
 
-char* f_v1(int length)
-{
-    static char str[150];
+static char* str;
 
-    int num = 0, zeroCount = 0, i = 0;
-    bool flagNum = true;
-
-    while(i < length)
-    {
-        if(!flagNum)
-        {
-            str[i++] = '0';
-            zeroCount++;
-            if (zeroCount == num)
-                flagNum = true;
-        }
-        else
-        {
-            sprintf(str+i++, "%d", 1+num++);
-            flagNum = false;
-            zeroCount = 0;
-        }
-    }
-    str[i] = '\0';
-
-    return str;
-}
-
-void f_v2(int n)
-{
-    if (n < 0)
-    {
-        printf("f_v2: %d is incorrect argument\n", n);
+void f(int length){
+    if (length < 1)
         return;
-    }
 
-    char* str = (char*)calloc(n+1, sizeof(char));
-    int i = 0, el = 1, step = 2;
-    while (i < n)
+    int strIt = 0;
+    int el = 1;
+    int step = 2;
+
+    int numSize = 1, decCount = 10;
+
+    while (strIt < length)
     {
-        sprintf(str+i, "%d", el);
-        i += step;
+        sprintf(str+strIt, "%d", el);
+        strIt += step+(numSize-1);
         step++;
         el++;
+        if (el/decCount){
+            numSize++;
+            decCount *= 10;
+        }
     }
 
-    i = -1;
-    while(i < n)
+    strIt = -1;
+    while(strIt < length)
     {
-        i++;
-        if (str[i] | 0x00)
-            continue;
-        str[i] = '0';
+        strIt++;
+        if (str[strIt]) continue;
+        str[strIt] = '0';
     }
 
-    str[n] = '\0';
-    printf("f_v2(%d) -> \"%s\"\n", n, str);
-    free(str);
+    str[length] = '\0';
 }
 
-int main(int argc, char* argv[])
-{
-    int n = atoi(argv[1]);
-    if (n < 0)
-    {
-        printf("Error: %d is incorrect argument\n", n);
-        exit(-1);
-    }
+int main(int argc, char* argv[]){
+    if (argc > 1){
+        int length = atoi(argv[1]);
+        int allocMemSize = ((length > 0) ? length : 0) + 1;
 
-    printf("f_v1(%d) -> \"%s\"\n", n, f_v1(n));    
-    f_v2(n);
+        str = (char*)calloc(allocMemSize, sizeof(char));
+
+        f(length);
+        (void)printf("f(%d) -> \"%s\"\n", length, str);
+        
+        free(str);
+        str = NULL;
+    }
 
     return 0;
 }

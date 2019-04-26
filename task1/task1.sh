@@ -3,7 +3,7 @@
 cSource=$1
 pyScript=$2
 
-scriptsDir=$(find ~/ -name "$cSource" -execdir [ -e "$pyScript" ] \; -printf %h\\n)
+scriptsDir=$(find ~/ -name "$cSource" -execdir [ -e "$pyScript" ] 2>/dev/null \; -printf %h\\n)
 
 gcc ${scriptsDir}/${cSource} -o taskC
 chmod u+x $pyScript
