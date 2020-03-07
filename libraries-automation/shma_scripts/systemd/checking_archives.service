@@ -1,0 +1,10 @@
+[Unit]
+Description=Runs the script that check FTP-server and Skype-downloads for archives
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash "/opt/archive_rcv"
+
+[Install]
+WantedBy=default.target

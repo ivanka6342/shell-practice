@@ -1,0 +1,184 @@
+#!/bin/bash
+
+# Mail message header
+write_mail_header() {
+cat <<EOF > $PARTRQMAIL
+To: to_colleagues
+From: $SENDER_MAIL
+Subject: order. part info
+
+DATE: $(date +'%d %B %Y')
+----------------------------------------
+- automated mail on ASML part requests -
+- data is available on the server      -
+- .../projects/PartRequests/ASML/work  -
+----------------------------------------
+EOF
+}
+
+# Used for error checks where command can fail
+err() {
+    write_mail_header
+    echo "$UTIL_NAME: error: $@" | tee -a "$PARTRQMAIL" >&2
+    ssmtp "$SENDER_MAIL" < "$PARTRQMAIL"
+    rm -rf "$TEMP_DIR"
+    exit 1
+}
+
+MAIL_F="y"
+SINGLE_ADDRESS=""
+SINGLE_ADDRESS_F="n"
+TRELLO_F="y"
+
+# nc12
+ARCHIVE="arhcivename.tar.gz"
+UTIL_NAME="$(basename "${0}")"
+SAVE_DIR=""
+TEMP_DIR="$(mktemp -d -t "$UTIL_NAME"_XXXXX --tmpdir=/tmp/)" || err "failed to make /tmp/$0_XXXXX"
+PARTRQMAIL="$(mktemp "$TEMP_DIR"/pr_mail.XXXXX)" || err "failed to make PARTRQMAIL"
+TRELLOCARD="$(mktemp "$TEMP_DIR"/trello_card.XXXXX)" || err "failed to make TRELLOCARD"
+SENDER_MAIL="sender@example.mail"
+DEV_MAIL="ivanka6342@mail.ru"
+RCP_ADD_FILE="/uexchange/ztmp/recepient_emails.txt"
+RECIPIENT_LIST="$(cat "$RCP_ADD_FILE")"
+
+usage() {
+cat <<EOF
+Usage : $0 [-hsca] [-f ORDER_FILE]
+This script is designed for unpacking automatically recieved archieves, parsing orders, updating ASML libs and send mails to all employees with access rights
+
+Options:
+    -h, --help                show help page and exit
+    -s, --send-mail  STATE    allow/deny mailing. Could be "y" or "n"
+        --enable-send-mail    send mail automatically
+        --disable-send-mail   do not send mail automatically
+    -c, --card       STATE    save info for trello card. Could be "y" or "n"
+    -a, --address    ADDRESS  send mail to only specified recipients(instead of all)
+    -f, --file       NAME     specify archive name
+
+Example:    bash $0 -c y -a my_boss@company.com -f some_archive.tar.gz
+EOF
+}
+
+parse_options() {
+    if [ "$#" -lt 1 ]; then
+        echo "$0: missing file operand"
+        echo "Try 'bash $0 --help' for more information"
+        exit
+    fi
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                ;;
+            -s|--send-mail|--enable-send-mail|--disable-send-mail)
+                if [[ "$1" == "-s" || "$1" == "--send-mail" ]]; then
+                    shift
+                    if [ "$1" = "y" ]; then
+                        MAIL_F="y"
+                    else
+                        MAIL_F="n"
+                    fi
+                elif [ "$1" == "--enable-send-mail" ]; then
+                    MAIL_F="y"
+                else # "$1" == "--disable-send-mail"
+                    MAIL_F="n"
+                fi
+                ;;
+            -c|--card)
+                shift
+                if [ "$1" = "y" ]; then
+                    TRELLO_F="y"
+                else
+                    TRELLO_F="n"
+                fi
+                ;;
+            -a|--address)
+                shift
+                SINGLE_ADDRESS_F="y"
+                SINGLE_ADDRESS="$1"
+                ;;
+            -f|--file)
+                shift
+                ARCHIVE="$1"
+                ;;
+            *)
+                ARCHIVE="$1"
+                ;;
+        esac
+        shift
+    done
+    SAVE_DIR="$(dirname "$ARCHIVE")/"
+}
+
+# Archive unpacking(get part data) and deletion
+archive_unpacking() {
+    tar xf "$ARCHIVE" -C "$TEMP_DIR" || err "failed to unpack archive $ARCHIVE"
+    for tnc in "$TEMP_DIR/"4022*.tar; do    
+        tar xf "$tnc" -C "$TEMP_DIR" || err "failed to unpack archive '$tnc'"
+        rm -rf "$tnc"
+    done
+}
+
+# Transfer the necessary data from the archive into files(for mailing and saving on trello)
+parse_data() {
+    for it in "$TEMP_DIR/"4022*; do
+        i=$(find "$it" -type f -name 4022*".html")
+        echo "PART: `basename $it`" | tee -a "$PARTRQMAIL" >> "$TRELLOCARD"
+        echo `grep Manufacturer $i | tail -n 1 | sed 's/Manufacturer/Manufacturer: /g' | sed 's!<[^>]\+>!!g'` | tee -a "$PARTRQMAIL" >> "$TRELLOCARD"
+        echo `grep Partnumber   $i | tail -n 1 | sed 's/Partnumber/Partnumber: /g'     | sed 's!<[^>]\+>!!g'` | tee -a "$PARTRQMAIL" >> "$TRELLOCARD"
+        echo `grep Description  $i | tail -n 1 | sed 's/Description/Description: /g'   | sed 's!<[^>]\+>!!g'` | tee -a "$PARTRQMAIL" >> "$TRELLOCARD"
+        echo "----------------------------------------" | tee -a "$PARTRQMAIL" >> "$TRELLOCARD"
+    done
+}
+
+# Send mail to all involved OR to single address
+send_mail() {
+    if [ "$SINGLE_ADDRESS_F" == "y" ]; then
+        ssmtp "$SINGLE_ADDRESS" < "$PARTRQMAIL"
+    elif [ "$MAIL_F" == "y" ]; then
+        for it in $RECIPIENT_LIST; do
+            ssmtp "$it" < "$PARTRQMAIL"
+        done
+    fi
+}
+
+# Remove garbage and save libraries
+remove_and_save() {
+    for d in $(echo `ls -d $TEMP_DIR/*/` | grep '4022*'); do
+        mv "$d" "$SAVE_DIR"
+    done
+
+    leftfolders=$(echo `ls -d $TEMP_DIR/*/` | grep '4022*') 2>/dev/null
+
+    # If data could not be moved, since the directory already exists
+    if [ -n "$leftfolders" ]; then
+        for d in $leftfolders; do
+            mv "$d"* "$SAVE_DIR$d"
+        done
+    fi
+
+    chmod 777 "$SAVE_DIR" "$SAVE_DIR"* "$SAVE_DIR"*/*
+
+    if [ "$TRELLO_F" == "y" ]; then
+        mv "$TRELLOCARD" "$SAVE_DIR./trello_card.txt"
+        chmod 777 "$SAVE_DIR./trello_card.txt"
+    fi
+
+    for lib in "$TEMP_DIR/"vx2*; do
+        mv "$lib" "$SAVE_DIR"
+        chmod 777 "$SAVE_DIR"vx2*
+    done
+
+    rm -rf "$TEMP_DIR"
+}
+
+
+# Start of execution
+parse_options $@
+archive_unpacking
+write_mail_header
+parse_data
+send_mail
+remove_and_save

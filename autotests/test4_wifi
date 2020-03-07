@@ -1,0 +1,280 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+PROMPT="root@trustbox:~#"
+TTY="/dev/ttyUSB0"
+LOGIN="root"
+PASS="root"
+TEST_STR="///////////////////////////////"
+SSID="WombatNet"
+WIFI_PASS="terminator"
+INT_NAME_BASE="wlx"
+LOCAL_PING_ADDRESS="192.168.42.1"
+GLOBAL_PING_ADDRESS="8.8.8.8"
+
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+    exit 1
+}
+
+boot_n_login() {
+    # wait starting u-boot
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 10
+        expect {
+            "U-Boot SPL" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+    
+        # time to finish bootloader(u-boot) work
+        set timeout 7
+        expect {
+            "Hit any key to stop autoboot:" { puts "\n$TEST_STR U-BOOT PROMPT $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 4 }
+        }
+
+        close
+EOF
+    res="$?"
+    if [ "$res" -ne "0" ]; then
+        if [ "$res" -eq "3" ]; then
+            echo -e "\tpower was not supplied" | tee -a "$LOG_FILE"
+        elif [ "$res" -eq "4" ]; then
+            echo -e "\tU-boot not work" | tee -a "$LOG_FILE"
+        fi
+        err
+    else
+        if [ "$1" == "--verbose" ]; then
+            echo -e "\tpower supplied. U-boot prompt:" | tee -a "$LOG_FILE"  
+        fi
+    fi
+
+    # wait starting kernel
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        # time to finish bootloader(u-boot) work
+        set timeout 15
+        expect {
+            "Starting kernel ..." { puts "\n$TEST_STR STARTING KERNEL $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+    if [ "$?" -ne "0" ]; then
+        err "kernel was not started"
+    else
+        if [ "$1" == "--verbose" ]; then
+            echo -e "\tstarting kernel ..." | tee -a "$LOG_FILE"  
+        fi
+    fi
+
+    # wait system prompt
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        # time to boot system
+        set timeout 40;
+        expect {
+            "trustbox login:" { puts "\n$TEST_STR SYSTEM LOADED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+    if [ "$?" -ne "0" ]; then
+        err "system was not loaded"
+    else
+        if [ "$1" == "--verbose" ]; then
+            echo -e "\tsystem loaded" | tee -a "$LOG_FILE"  
+        fi
+    fi
+
+    #login system
+    echo -e '\x03\n' > $TTY
+    sleep 1
+    echo "$LOGIN" > "$TTY"
+    sleep 1
+    echo "$PASS" > "$TTY"
+
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        set timeout 5
+        expect {
+            "$PROMPT" { puts "$TEST_STR LOGIN SUCCESS $TEST_STR\r"; }
+            timeout { puts "TIME OUT\r"; exit 3 }
+        }
+
+        close
+EOF
+
+    if [ "$?" -ne "0" ]; then
+        err "failed to log in"
+    else
+        if [ "$1" == "--verbose" ]; then
+            echo -e "\tlogin successful" | tee -a "$LOG_FILE"  
+        fi
+    fi
+}
+
+get_interface_name() {
+    tmp_f=`mktemp /tmp/wifi_data.XXXXX`
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+
+            system("echo \"ip a | grep --color=never '$INT_NAME_BASE'\" >> '$TTY'")
+            system("sync")
+        }' > $tmp_f
+    sleep 2
+    interface=`cat $tmp_f | grep --color=never 'BROADCAST' | cut -d: -f2 | cut -c 2-`
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+
+    if [ -z "$interface" ]; then
+        echo -e "\twireless interface not found" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\twireless interface : '$interface'" | tee -a "$LOG_FILE"
+    fi
+}
+
+configure_interface() {
+    # configure wpa_supplicant
+    echo "killall wpa_supplicant" >> $TTY
+    echo "wpa_supplicant -B -i '$interface' -c <(wpa_passphrase '$SSID' '$WIFI_PASS')" >> $TTY
+    # > /dev/null
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        set timeout 3
+        expect {
+            "Successfully initialized wpa_supplicant" { puts "OK"; exp_continue }
+            "$PROMPT" { puts "full OK" }
+            "Fail" { puts "error\r"; exit 3 }
+            "Could not read" { puts "error\r"; exit 3 }
+            "Failed" { puts "error\r"; exit 3 }
+            "No such device" { puts "error\r"; exit 3 }
+            "does not" { puts "error\r"; exit 3 }
+        }
+
+        send -- "$UART_EXIT"
+        close
+EOF
+    if [ "$?" -ne "0" ]; then
+        echo -e "\twpa_supplicant config failed" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\twpa_supplicant configured" | tee -a "$LOG_FILE"
+    fi
+
+
+    # check if wireless interface is UP
+    tmp_f=`mktemp /tmp/wifi_data.XXXXX`
+    sleep 3
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+
+            system("echo \"ip a | grep --color=never '$interface:.*state'\" >> '$TTY'")
+            system("sync")
+        }' > $tmp_f
+    sleep 1
+    
+    cat $tmp_f
+    echo
+    ip_str="$(cat $tmp_f | grep --color=never "$interface:.*state UP")"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+
+    if [ -n "$ip_str" ]; then
+        echo -e "\tinterface is UP" | tee -a "$LOG_FILE"
+    else
+        echo -e "\tinterface is DOWN" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+
+
+    # get IP-address from DHCP-server
+    echo "dhclient -v '$interface'" >> $TTY
+    # > /dev/null
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        set timeout 5
+        expect {
+            "DHCPACK" { puts "DHCP-ACK"; exp_continue }
+            "$PROMPT" { puts "DHCP OK" }
+            timeout { puts "DHCP error\r"; exit 3 }
+        }
+
+        send -- "$UART_EXIT"
+        close
+EOF
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tgetting IP from DHCP-server failed" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tIP getted" | tee -a "$LOG_FILE"
+    fi
+}
+
+test_connection() {
+    # check ping
+    echo "ping -I '$interface' -c 5 8.8.8.8" >> $TTY
+    # > /dev/null
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        set timeout 5
+        expect {
+            "ping statistics" { puts "ping stat"; exp_continue }
+            "$PROMPT" { puts "ping OK" }
+            timeout { puts "ping error\r"; exit 3 }
+        }
+
+        send -- "$UART_EXIT"
+        close
+EOF
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tping failed" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tping OK" | tee -a "$LOG_FILE"
+    fi
+}
+
+
+###############
+# start of exec
+###############
+clear
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+
+echo "----------------------------" | tee -a $LOG_FILE
+echo "start wi-fi test" | tee -a "$LOG_FILE"
+echo -e '\x03\n' > $TTY
+
+boot_n_login --verbose
+get_interface_name
+configure_interface
+test_connection
+
+echo
+echo "test done" | tee -a $LOG_FILE
+echo "----------------------------" | tee -a $LOG_FILE

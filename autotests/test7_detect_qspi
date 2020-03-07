@@ -1,0 +1,84 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+TEST_STR="///////////////////////////////"
+TTY="/dev/ttyUSB0"
+
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    rm $tmp_f
+    exit 1
+}
+
+power_supply() {
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 10
+        expect {
+            "U-Boot SPL" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tpower was not supplied" | tee -a "$LOG_FILE" 
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tpower supplied" | tee -a "$LOG_FILE"
+    fi
+}
+
+write_info() {
+    expect -i >> /dev/null <<EOF
+        log_file $tmp_f
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 20
+        expect {
+            "Hit any key to stop autoboot:" { puts "\n$TEST_STR END OF RECORD $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+}
+
+check_qspi_info() {
+    result="$(cat $tmp_f | grep 'SF: Detected' | tail -n 2)"
+
+    if [ -z "$(echo $result | grep 'sst26wf080b')" ] || [ -z "$(echo $result | grep 'mt25qu512a')" ]; then
+        err "test failed"
+    fi
+
+    echo -e "\tQSPI flash detected" | tee -a $LOG_FILE
+    echo "$result"
+}
+
+
+####################
+# start of execution
+####################
+clear
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a "$LOG_FILE"
+echo "start detect QSPI" | tee -a "$LOG_FILE"
+echo "pls insert the power cable into trustboard(10s)"
+
+tmp_f=`mktemp /tmp/OPTEE_test_data.XXXXX`
+power_supply
+write_info
+check_qspi_info
+rm $tmp_f
+
+echo
+echo "test done" | tee -a $LOG_FILE
+echo "----------------------------" | tee -a $LOG_FILE

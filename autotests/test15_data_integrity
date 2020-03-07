@@ -1,0 +1,176 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+TEST_STR="///////////////////////////////"
+TTY="/dev/ttyUSB0"
+UBOOT_PROMPT="=>"
+FILE_MD5_SUM="7583b57452ccb83f9d313ab76e3629b8"
+LOAD_RAM_ADDR_HEX="95000000"
+CONTROL_FILE="control_file"
+FILE_SIZE_DEC="512000000"
+FILE_SIZE_HEX="1E848000"
+TIME_TO_LOAD="500" # last success read expand ~ 460 sec
+TIME_FOR_MD5="20"
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+    exit 1
+}
+
+test_bootloader() {
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 10
+        expect {
+            "U-Boot SPL" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+    
+        # time to finish bootloader(u-boot) work
+        set timeout 7
+        expect {
+            "Hit any key to stop autoboot:" { puts "\n$TEST_STR U-BOOT PROMPT $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 4 }
+        }
+
+        close
+EOF
+
+    res="$?"
+    if [ "$res" -ne "0" ]; then
+        if [ "$res" -eq "3" ]; then
+            echo -e "\tpower was not supplied" | tee -a "$LOG_FILE"
+        elif [ "$res" -eq "4" ]; then
+            echo -e "\tU-boot not work" | tee -a "$LOG_FILE"
+        fi
+        err
+    else
+        echo > "$TTY"
+        if [ "$1" == "-verbose" ]; then
+            echo -e "\tpower supplied. U-boot prompt:" | tee -a "$LOG_FILE"  
+        fi
+    fi
+}
+
+file_availability() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+
+    echo "ext4ls mmc 0:1" > "$TTY"
+    sleep 1
+    
+    res=`cat $tmp_f | grep "$FILE_SIZE_DEC $CONTROL_FILE"`
+
+    if [ -z "$res" ]; then
+        err "ext4ls: file not found" | tee -a $LOG_FILE
+    else
+        echo -e "\text4ls: file '$CONTROL_FILE' exist" | tee -a $LOG_FILE
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+    echo > $tmp_f
+}
+
+load_file_to_ram() {
+    echo -e "\tstart loading file into ram from mmc" | tee -a $LOG_FILE
+
+    # ext4load mmc 0:1 95000000 control_file 1E848000
+    echo "ext4load mmc 0:1 $LOAD_RAM_ADDR_HEX $CONTROL_FILE $FILE_SIZE_HEX" > "$TTY"
+    start_time=`date +%s.%N`
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        set timeout $TIME_TO_LOAD
+        expect {
+            "bytes read in" { puts "\n$TEST_STR file loaded! $TEST_STR\n" }
+            "ERROR" { puts "ext4load error: incorrect address\n"; close; exit 3 }
+            "File not found" { puts "ext4load error: File not found\n"; close; exit 3 }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+        close
+EOF
+    stop_time=`date +%s.%N`
+
+    if [ "$?" -ne "0" ]; then
+        err "u-boot(ext4load) : error load file"
+    else
+        echo -e "\tu-boot(ext4load) : file loaded in 0`echo "$stop_time - $start_time" | bc | head -c 5` sec" | tee -a "$LOG_FILE"
+    fi
+}
+
+forked_f() {
+    echo "forked proc $$"
+    sleep 1
+    echo "md5sum $LOAD_RAM_ADDR_HEX $FILE_SIZE_HEX" > "$TTY"
+}
+
+cmp_checksum() {
+    echo "start test checksum"
+    forked_f &
+    
+    start_time=`date +%s`
+    expect -i  <<EOF
+        spawn cat "$TTY"
+        set timeout $TIME_FOR_MD5
+        expect {
+            "md5 for" { puts "\n$TEST_STR md5 calculated $TEST_STR\n"; send "\n" }
+            "ERROR" { puts "md5sum err: incorrect address\n"; close; exit 3 }
+            "Usage:" { puts "md5sum err: incorrect arguments\n"; close; exit 3 }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+    stop_time=`date +%s`
+
+    if [ "$?" -ne "0" ]; then
+        err "md5sum err"
+    fi
+        
+    awk 'BEGIN {
+        system("cat '$TTY' & echo $!")
+    }' > $tmp_f
+
+    echo > "$TTY"
+    sleep_time=`echo "$stop_time - $start_time + 2" | bc`
+    echo "sleep for $sleep_time sec"
+    sleep $sleep_time
+    
+    res="$(cat $tmp_f | grep 'md5 for' | tail -n 1)"
+    echo "result: $res"
+    
+    if [[ $res != *$FILE_MD5_SUM* ]]; then
+        err "md5sum not equals"
+    fi
+    
+    echo -e "\tfile md5sum equals" | tee -a $LOG_FILE
+    kill -9 `head -n 1 $tmp_f`
+}
+
+
+####################
+# start of execution
+####################
+clear
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a "$LOG_FILE"
+echo "start data integrity test" | tee -a "$LOG_FILE"
+echo "pls insert the power cable into trustboard(10s)"
+
+tmp_f=`mktemp /tmp/data.XXXXX`
+test_bootloader -verbose
+file_availability
+load_file_to_ram
+cmp_checksum
+rm $tmp_f
+
+echo
+echo "test done" | tee -a $LOG_FILE
+echo "----------------------------" | tee -a $LOG_FILE

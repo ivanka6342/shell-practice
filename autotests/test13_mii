@@ -1,0 +1,154 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+PROMPT="=>"
+TEST_STR="///////////////////////////////"
+TTY="/dev/ttyUSB0"
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+    exit 1
+}
+
+test_bootloader() {
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 10
+        expect {
+            "U-Boot SPL" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+    
+        # time to finish bootloader(u-boot) work
+        set timeout 7
+        expect {
+            "Hit any key to stop autoboot:" { puts "\n$TEST_STR U-BOOT PROMPT $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 4 }
+        }
+
+        close
+EOF
+
+    res="$?"
+    if [ "$res" -ne "0" ]; then
+        if [ "$res" -eq "3" ]; then
+            echo -e "\tpower was not supplied" | tee -a "$LOG_FILE"
+        elif [ "$res" -eq "4" ]; then
+            echo -e "\tU-boot not work" | tee -a "$LOG_FILE"
+        fi
+        err
+    else
+        echo > "$TTY"
+        if [ "$1" == "-verbose" ]; then
+            echo -e "\tpower supplied. U-boot prompt:" | tee -a "$LOG_FILE"  
+        fi
+    fi
+}
+
+mii_device() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+    sleep 1
+    
+    echo "mii device" > $TTY
+    sleep 1
+    res="$(cat $tmp_f | grep --color=never -A 2 'mii device' | tail -n 2)"
+    sync
+    echo -e "//////mii device result\n$res"
+
+    if [ -n "$(echo $res | head -n 1 | grep 'MII devices:')" ] && [ -n "$(echo $res | tail -n 1 | grep 'Current device:')" ]; then
+        echo -e "\tmii device work done" | tee -a "$LOG_FILE"
+        echo "$res" | while IFS='\n' read -r it; do
+            echo -e "\t\t$it" | tee -a "$LOG_FILE"
+        done
+    else
+        err "mii device error"
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+}
+
+mii_read() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+    sleep 1
+    
+    echo "mii read 1 0" > $TTY
+    sleep 1
+    res1="$(cat $tmp_f | grep --color=never -A 1 "mii read 1 0" | tail -n 1)"
+    sync
+    echo "//////print mii read 1 0 result : '$res1'"
+
+    echo "mii read 2 0" > $TTY
+    sleep 1
+    res2="$(cat $tmp_f | grep --color=never -A 1 "mii read 2 0" | tail -n 1)"
+    sync
+    echo "//////print mii read 2 0 result : '$res2'"
+
+    if [[ $res1 == $res2 ]]; then
+        echo -e "\tmii read success" | tee -a "$LOG_FILE"
+        echo -e "\t\tget data: $res1" | tee -a "$LOG_FILE"
+    else
+        err "mii read error"
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+}
+
+mii_info() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+    sleep 1
+    
+    echo "mii info 1" > $TTY
+    sleep 1
+    res1="$(cat $tmp_f | grep --color=never -A 1 "mii info 1" | tail -n 1)"
+    sync
+    echo "//////print mii info 1 result : '$res1'"
+
+    echo "mii info 2" > $TTY
+    sleep 1
+    res2="$(cat $tmp_f | grep --color=never -A 1 "mii info 2" | tail -n 1)"
+    sync
+    echo "//////print mii info 2 result : '$res2'"
+
+    if [ -n "$(echo $res1 | grep 'PHY.*OUI.*Model.*Rev')" ] && [ -n "$(echo $res2 | grep 'PHY.*OUI.*Model.*Rev')" ]; then
+        echo -e "\tmii info - ok" | tee -a "$LOG_FILE"
+        echo -e "\t\t$res1\n\t\t$res2" | tee -a "$LOG_FILE"
+    else
+        err "mii info error"
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+}
+
+
+####################
+# start of execution
+####################
+clear
+parse_options $@
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a "$LOG_FILE"
+echo "start MII test" | tee -a "$LOG_FILE"
+echo "pls insert the power cable into trustboard(10s)"
+
+tmp_f=`mktemp /tmp/data.XXXXX`
+test_bootloader -verbose
+
+mii_device
+mii_read
+mii_info
+
+rm $tmp_f
+echo -e "test done" | tee -a "$LOG_FILE"
+echo "----------------------------" | tee -a "$LOG_FILE"

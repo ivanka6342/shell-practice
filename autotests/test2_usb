@@ -1,0 +1,82 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+PROMPT="root@trustbox:~#"
+TTY="/dev/ttyUSB0"
+
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+    exit 1
+}
+
+get_USB_info() {
+    tmp_f=`mktemp /tmp/usb_data.XXXXX`
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+
+            system("echo \"usb-devices | grep --color=never -B 7 '^I:.*Driver=usb-storage'\" >> '$TTY'")
+            system("sync")
+        }' > $tmp_f
+
+    sleep 3
+    USB_info=`cat $tmp_f`
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+}
+
+parse_USB_info() {
+    echo "$USB_info" | while IFS= read -r it; do
+        case $it in
+            # bus, port, speed
+            *T:*)
+                for t in $it; do
+                    case "${t%%=*}" in
+                        Bus|Port|Spd)
+                            echo -e "\t$t" | tee -a $LOG_FILE
+                            ;;
+                        *)
+                            ;;
+                    esac
+                done
+                ;;
+            # manufacturer, product
+            *S:*)
+                case "${it%%=*}" in
+                    *Manufacturer*)
+                        echo -ne "\tManufacturer=${it##*=}" | tee -a $LOG_FILE
+                        ;;
+                    *Product*)
+                        echo -ne "\tProduct=${it##*=}" | tee -a $LOG_FILE
+                        ;;
+                    *)
+                        ;;
+                esac
+                ;;
+            --*)
+                echo "----------------------------" | tee -a $LOG_FILE
+                ;;
+        esac
+    done
+}
+
+
+####################
+# start of execution
+####################
+clear
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a $LOG_FILE
+echo "start usb test" | tee -a "$LOG_FILE"
+echo -e '\x03\n' > "$TTY"
+
+get_USB_info
+parse_USB_info
+
+echo
+echo "test done" | tee -a $LOG_FILE
+echo "----------------------------" | tee -a $LOG_FILE

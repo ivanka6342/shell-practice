@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# ssmtp credentials
+SSMTP_CONFIG="./ssmtp.conf"
+REVALIASES_CONFIG="./revaliases"
+SSMTP_TEST_MSG="$(mktemp ./test_msg.XXXXX)"
+
+cp ./ssmtp.txt ./$SSMTP_CONFIG
+cp ./revaliases.txt ./$REVALIASES_CONFIG
+
+#install ssmtp if not installed
+if [ -z "$(dpkg --get-selections | grep ssmtp)" ] ; then
+    sudo apt install ssmtp
+fi
+
+echo "pls type your email:"
+read email
+echo "pls type your password:"
+read -s pass
+clear
+echo "a test message will be sent to your email"
+
+# Update data in post congigs
+# $1 - name of field to replace
+# $2 - new value of this field
+# $3 - target file
+# $4 - end of string 
+upd() {
+    local old_p=$(grep "$1" $3)
+    local new_p="$1$2$4"
+    sed -i "s/$old_p/$new_p/" $3
+}
+
+upd "AuthUser=" $email $SSMTP_CONFIG
+upd "root=" $email $SSMTP_CONFIG
+upd "AuthPass=" $pass $SSMTP_CONFIG
+
+upd "root:" $email $REVALIASES_CONFIG ":smtp.yandex.ru:465"
+upd "www-data:" $email $REVALIASES_CONFIG ":smtp.yandex.ru:465"
+
+upd "From: " $email $SSMTP_TEST_MSG
+
+
+#move this configs to ssmtp folder for use
+sudo chmod 640 $SSMTP_CONFIG
+sudo chmod 640 $REVALIASES_CONFIG
+sudo mv ./$SSMTP_CONFIG /etc/ssmtp/$SSMTP_CONFIG
+sudo mv ./$REVALIASES_CONFIG /etc/ssmtp/$REVALIASES_CONFIG
+
+cat <<EOF > $SSMTP_TEST_MSG
+To: me
+From: $email
+Subject: title
+
+sample text
+EOF
+
+ssmtp $email < $SSMTP_TEST_MSG
+rm $SSMTP_TEST_MSG

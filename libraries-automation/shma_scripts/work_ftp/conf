@@ -1,0 +1,82 @@
+#!/bin/bash
+
+CREDENTIALS="/home/$(echo $USER)/.config/lftp/cred"
+ARCHIVES_SCRIPT="archive_rcv"
+EXEC_DIR="/opt/"
+SYSTEMD_SERVICE="/etc/systemd/system/checking_archives.service"
+SYSTEMD_TIMER="/etc/systemd/system/checking_archives.timer"
+
+config_ftp() {
+    # Install lftp if not installed
+    if [ -z "$(dpkg --get-selections | grep lftp)" ] ; then
+        sudo apt install lftp
+    fi
+
+    sudo cp "$ARCHIVES_SCRIPT" "$EXEC_DIR"
+
+    # Ask for credentials and write it to config if it weren't configured
+    if [ -z "$(ls $CREDENTIALS)" ] ; then
+        echo "pls type your login to FTP-server:"
+        read login
+
+        echo "pls type your password to FTP-server:"
+        read -s pass
+        clear
+
+cat <<EOF > "$CREDENTIALS"
+login=$login
+pass=$(echo $pass | base64)
+EOF
+        chmod 640 "$CREDENTIALS"
+    fi
+}
+
+# Create systemd service unit that runs required script archive checking
+create_service() {
+    temp_file="$(mktemp /tmp/temp_file.XXXXX)"
+
+    cat <<EOF > "$temp_file"
+[Unit]
+Description=Runs the script that check FTP-server and Skype-downloads for archives
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash "$EXEC_DIR$ARCHIVES_SCRIPT"
+
+[Install]
+WantedBy=default.target
+EOF
+    sudo mv "$temp_file" "$SYSTEMD_SERVICE"
+}
+
+# Create and run systemd timer unit for periodic start of service above
+create_timer() {
+    temp_file="$(mktemp /tmp/temp_file.XXXXX)"
+
+cat <<EOF > "$temp_file"
+[Unit]
+Description=Starts $(basename "$SYSTEMD_SERVICE") every 30 minutes
+After=network.target
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=30min
+Unit=$(basename "$SYSTEMD_SERVICE")
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    sudo mv "$temp_file" "$SYSTEMD_TIMER"
+
+    sudo systemctl enable "$(basename $SYSTEMD_TIMER)"
+    sudo systemctl start "$(basename $SYSTEMD_TIMER)"
+}
+
+
+# Start of execution
+config_ftp
+create_service
+create_timer
+sudo journalctl --vacuum-time=5d

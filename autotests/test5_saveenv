@@ -1,0 +1,148 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+PROMPT="=>"
+TEST_STR="///////////////////////////////"
+TTY="/dev/ttyUSB0"
+
+
+err() {
+    echo -e "\t$1" | tee -a "$LOG_FILE"
+    echo "----------------------------" | tee -a "$LOG_FILE"
+
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+    exit 1
+}
+
+test_bootloader() {
+    expect -i >> /dev/null <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 10
+        expect {
+            "U-Boot SPL" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+    
+        # time to finish bootloader(u-boot) work
+        set timeout 7
+        expect {
+            "Hit any key to stop autoboot:" { puts "\n$TEST_STR U-BOOT PROMPT $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 4 }
+        }
+
+        close
+EOF
+
+    res="$?"
+    if [ "$res" -ne "0" ]; then
+        if [ "$res" -eq "3" ]; then
+            echo -e "\tpower was not supplied" | tee -a "$LOG_FILE"
+        elif [ "$res" -eq "4" ]; then
+            echo -e "\tU-boot not work" | tee -a "$LOG_FILE"
+        fi
+        err
+    else
+        echo > "$TTY"
+        if [ "$1" == "-verbose" ]; then
+            echo -e "\tpower supplied. U-boot prompt:" | tee -a "$LOG_FILE"  
+        fi
+    fi
+}
+
+# @1 - var name
+# @2 - value
+define_var() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+    sleep 1
+
+    echo "setenv $1 $2" > $TTY
+    sleep 1
+    res="$(cat $tmp_f | grep --color=never -A 1 "setenv $1 $2" | tail -n 1)"
+    echo "/////setenv result : '$res'"
+
+    if [[ *$res* == *$PROMPT* ]]; then
+        if [ -z $2 ]; then
+            echo -e "\tremove var '$1' from env" | tee -a "$LOG_FILE"
+        else
+            echo -e "\tsetenv '$1' to value '$2'" | tee -a "$LOG_FILE"
+        fi
+    else
+        err "setenv '$1' to value '$2' error"
+    fi
+
+    echo "saveenv" > $TTY
+    sleep 1
+    res="$(cat $tmp_f | grep --color=never -A 2 "saveenv" | tail -n 1)"
+    echo "/////saveenv result : '$res'"
+
+    if [[ *$res* == *OK* ]]; then
+        echo -e "\tsave env ok" | tee -a "$LOG_FILE"
+    else
+        err "save env err"
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+}
+
+# @1 - var name
+# @2 - value
+# @3 - wanted state(could be "y" or "n")
+is_var_defined() {
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+        }' > $tmp_f
+    sleep 1
+
+    echo "printenv $1" > $TTY
+    sleep 1
+    res="$(cat $tmp_f | grep --color=never -A 1 "printenv $1" | tail -n 1)"
+    echo "/////printenv result : '$res'"
+
+    ## Error: "a" not defined
+    if [[ *$res* == *defined* && $3 == n ]]; then
+        echo -e "\tvar is not defined - OK" | tee -a "$LOG_FILE"
+    elif [[ *$res* == *$1=$2* && $3 == y ]]; then
+        echo -e "\tvar is defined - OK" | tee -a "$LOG_FILE"
+    elif [[ *$res* == *$1=* && $3 == n ]]; then
+        echo -e "\tvar is predefined - OK" | tee -a "$LOG_FILE"
+    else
+        err "define var err"
+    fi
+
+    kill -9 `head -n 1 $tmp_f`
+}
+
+
+####################
+# start of execution
+####################
+clear
+parse_options $@
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a "$LOG_FILE"
+echo "start SAVEENV test" | tee -a "$LOG_FILE"
+echo "pls insert the power cable into trustboard(10s)"
+
+name="a"
+value="a"
+tmp_f=`mktemp /tmp/data.XXXXX`
+
+test_bootloader -verbose
+is_var_defined "$name" "$value" "n"
+define_var "$name" "$value"
+
+echo "reset" > $TTY
+test_bootloader
+
+is_var_defined "$name" "$value" "y"
+define_var "$name" ""
+is_var_defined "$name" "$value" "n"
+
+echo -e "test done" | tee -a "$LOG_FILE"
+echo "----------------------------" | tee -a "$LOG_FILE"
+rm $tmp_f

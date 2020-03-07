@@ -1,0 +1,69 @@
+#!/bin/bash
+
+HOST="46.243.197.215"
+PORT="21"
+CREDENTIALS="/home/$(id -nu 1000)/.config/lftp/cred"
+FTP_USER=`grep 'login=' "$CREDENTIALS" | cut -d '=' -f2`
+FTP_PASS=`grep 'pass=' "$CREDENTIALS" | cut -d '=' -f2 | base64 --decode`
+UTIL_NAME=`basename "$0"`
+TEMP_FILE=`mktemp /tmp/"$UTIL_NAME".XXXXX`
+CHECK_DIR="/Minsk/from_Hengelo/ASML/"
+SAVE_DIR=""
+DOWNLOADS="/home/$(id -nu 1000)/Downloads/"
+UNPACKING_SCRIPT="/opt/unpack_target.script"
+# nc12
+TARGET_ARCHIVE="target_archive.tar.gz"
+
+# $1 - name of archive
+# Now target archive is in the same directory as unpacking script
+unpacking_archive() {
+    bash "$UNPACKING_SCRIPT" "-f" "$1"
+}
+
+# Download, process and remove data from sintecs-FTP
+check_ftp() {
+
+    # Auth and get the list of files
+    lftp <<EOF
+    open -u $FTP_USER,$FTP_PASS -p $PORT $HOST
+    cd $CHECK_DIR
+    ls | grep "$TARGET_ARCHIVE" > $TEMP_FILE
+    bye
+EOF
+
+    if [ -n "$(cat $TEMP_FILE)" ]; then
+        # Get list of only archives names
+        archive_list=`sed 's/[ \t]\+/ /g' "$TEMP_FILE" | cut -d ' ' -f9`
+
+        for it in $archive_list; do
+            SAVE_DIR="$(mktemp -d -t result_XXXXX --tmpdir=/uexchange/ztmp/)/"
+            cd "$SAVE_DIR"
+            
+            lftp <<EOF
+            open -u $FTP_USER,$FTP_PASS -p $PORT $HOST
+            cd $CHECK_DIR
+            get -E $it
+            bye
+EOF
+            unpacking_archive "$SAVE_DIR$it"
+        done
+    fi
+    rm -f "$TEMP_FILE"
+}
+
+# Data from ASML : copy archive to FTP-server(PROCESSED) and move it into working directory
+check_skype() {
+    archive_list="$(ls -1 $DOWNLOADS | grep $TARGET_ARCHIVE)"
+
+    if [ -n "$archive_list" ]; then
+        for it in $archive_list ; do
+            SAVE_DIR="$(mktemp -d -t result_XXXXX --tmpdir=/uexchange/ztmp/)/"  
+            mv "$DOWNLOADS$it" "$SAVE_DIR$it"
+            unpacking_archive "$SAVE_DIR$it"
+        done
+    fi
+}
+
+# Execution start
+check_ftp
+check_skype

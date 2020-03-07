@@ -1,0 +1,146 @@
+----------------------------
+start system boot test
+	power supplied; bootloader work done
+	power supplied; bootloader work done
+	power supplied; bootloader work done
+	power supplied; bootloader work done
+	starting kernel ...
+	system loaded
+	system boot time = 18.28
+	login successful
+
+	power supplied; bootloader work done
+	starting kernel ...
+	system loaded
+	system boot time = 15.43
+	login successful
+
+	power supplied; bootloader work done
+	starting kernel ...
+	system loaded
+	system boot time = 18.03
+	login successful
+
+	power supplied; bootloader work done
+	starting kernel ...
+	system loaded
+	system boot time = 15.59
+	login successful
+
+test done
+----------------------------
+----------------------------
+start usb test
+	Bus=01
+	Port=00
+	Spd=480
+	Manufacturer=Generic
+	Product=Mass Storage
+----------------------------
+	Bus=02
+	Port=01
+	Spd=5000
+	Manufacturer=ADATA
+	Product=ADATA USB Flash Drive
+test done
+----------------------------
+----------------------------
+start sd-card test
+
+	/dev/mmcblk0: 14.9 GiB
+	Disklabel type: dos
+test done
+----------------------------
+----------------------------
+start wi-fi test
+	wireless interface : 'wlxac35eef17025'
+	wpa_supplicant configured
+	interface is UP
+	IP getted
+	ping OK
+test done
+----------------------------
+----------------------------
+start SAVEENV test
+	power supplied. U-boot prompt:
+	var is not defined - OK
+	setenv 'a' to value 'a'
+	save env ok
+	var is defined - OK
+	remove var 'a' from env
+	save env ok
+	var is not defined - OK
+test done
+----------------------------
+----------------------------
+start checking OPTEE
+	power supplied
+	OP-TEE work done
+test done
+----------------------------
+----------------------------
+start detect QSPI
+	power supplied
+	QSPI flash detected
+test done
+----------------------------
+----------------------------
+start pfe-stop test
+	power supplied. U-boot prompt:
+	PFE successful stop
+test done
+----------------------------
+----------------------------
+start checking model
+	power supplied
+	Model and Board found
+test done
+----------------------------
+----------------------------
+start MAC address test
+	power supplied. U-boot prompt:
+	ethaddr=6c:95:22:00:03:1f
+test done
+----------------------------
+----------------------------
+start dynamic IP test
+	power supplied. U-boot prompt:
+	ip address : 192.168.42.79
+	dhcp work done
+	ping to 192.168.42.1 - OK
+test done
+----------------------------
+----------------------------
+start static IP test
+	power supplied. U-boot prompt:
+	ip 192.168.42.85 setted
+	ping to 192.168.42.1 - OK
+test done
+----------------------------
+----------------------------
+start MII test
+	power supplied. U-boot prompt:
+	mii device work done
+		MII devices: 'MDIO0' 'MDIO1' 
+		Current device: 'MDIO0'
+	mii read success
+		get data: 1140
+	mii info - ok
+		PHY 0x01: OUI = 0x80028, Model = 0x23, Rev = 0x01,  10baseT, HDX
+		PHY 0x02: OUI = 0x80028, Model = 0x23, Rev = 0x01,  10baseT, HDX
+test done
+----------------------------
+----------------------------
+start real eth speed test
+	client connected
+	10.4 sec  58.0 MBytes  46.7 Mbits/sec
+test done
+----------------------------
+----------------------------
+start data integrity test
+	power supplied. U-boot prompt:
+	ext4ls: file 'control_file' exist
+	start loading file into ram from mmc
+	u-boot(ext4load) : file loaded in 0460.8 sec
+	file md5sum equals
+----------------------------

@@ -1,0 +1,11 @@
+[Unit]
+Description=Starts checking_archives.service every 20 minutes
+After=network.target
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=20min
+Unit=checking_archives.service
+
+[Install]
+WantedBy=timers.target
