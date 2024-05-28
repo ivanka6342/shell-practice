@@ -1,0 +1,213 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+LOGIN="root"
+PASS="root"
+PROMPT="#"
+TEST_STR="///////////////////////////////"
+TTY="/dev/ttyUSB0"
+RESET_NUM=0
+ALLOW_RESET="n"
+REBOOT_NUM=0
+
+usage() {
+cat <<EOF
+Usage : $0 [-hrR] [-p port]
+This script is designed to test system boot
+
+Options:
+    -h, --help              show help page and exit
+    -r(--reset)     NUM     causes NUM bootloader reboot
+    -R(--reboot)    NUM     causes NUM reboot of the entire system
+    -p, --port      PATH    specify vTEST_STRirtual terminal port
+
+Example:    ./$0 --reboot 35 -p /dev/ttyUSB0
+EOF
+}
+
+parse_options() {
+    if [ "$#" -lt 1 ]; then
+        echo "$0: missing TTY operand"
+        echo "Try './$0 --help' for more information"
+        exit
+    fi
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                ;;
+            -r|--reset)
+                shift
+                RESET_NUM="$1"
+                ALLOW_RESET="y"
+                ;;
+            -R|--reboot)
+                shift
+                REBOOT_NUM=$1
+                ;;
+            -p|--port)
+                shift
+                TTY="$1"
+                ;;
+            *)
+                TTY="$1"
+                ;;
+        esac
+        shift
+    done
+}
+
+test_bootloader() {
+    expect -i <<EOF
+        spawn cat "$TTY"
+    
+        # time to connect power cable
+        set timeout 20
+        expect {
+            "U-Boot" { puts "\n$TEST_STR DEVICE CONNECTED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+    
+        # time to finish bootloader(u-boot) work
+        set timeout 7
+        expect {
+            "Hit any key to stop autoboot:  5" { puts "\n$TEST_STR YEAH, BOOT $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 4 }
+        }
+
+        close
+EOF
+
+    res="$?"
+    if [ "$res" -ne "0" ]; then
+        if [ "$res" -eq "3" ]; then
+            echo -e "\tpower was not supplied" | tee -a "$LOG_FILE"
+        elif [ "$res" -eq "4" ]; then
+            echo -e "\tbootloader not work" | tee -a "$LOG_FILE"
+        fi 
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo " " > "$TTY"
+        echo -e "\tpower supplied; bootloader work done" | tee -a "$LOG_FILE"
+    fi
+}
+
+test_boot_time() {
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        # time to boot system
+        set timeout 40;
+        expect {
+            "<READY>" { puts "\n$TEST_STR SYSTEM LOADED $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+
+    stop_time=`date +%s.%N`
+
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tsystem was not loaded" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tsystem loaded" | tee -a "$LOG_FILE"
+        echo -e "\tsystem boot time ="  `echo "$stop_time - $start_time" | bc | head -c 5` | tee -a "$LOG_FILE"
+    fi
+}
+
+# > /dev/null
+start_os_boot() {
+    echo "boot" > "$TTY"
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        # time to finish bootloader(u-boot) work
+        set timeout 15
+        expect {
+            "Starting kernel ..." { puts "\n$TEST_STR STARTING KERNEL $TEST_STR\n" }
+            timeout { puts "TIME OUT\n"; close; exit 3 }
+        }
+
+        close
+EOF
+
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tkernel was not started" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tstarting kernel ..." | tee -a "$LOG_FILE"
+        start_time=`date +%s.%N`
+        test_boot_time
+    fi
+}
+
+test_login() {
+    sleep 1
+    echo > "$TTY"
+    echo "$LOGIN" > "$TTY"
+    sleep 1
+    echo "$PASS" > "$TTY"
+
+    expect -i <<EOF
+        spawn cat "$TTY"
+
+        set timeout 5
+        expect {
+            "$PROMPT" { puts "$TEST_STR LOGIN SUCCESS $TEST_STR\r"; }
+            timeout { puts "TIME OUT\r"; exit 3 }
+        }
+
+        close
+EOF
+
+    if [ "$?" -ne "0" ]; then
+        echo -e "\tfailed to log in" | tee -a "$LOG_FILE"
+        echo "----------------------------" | tee -a "$LOG_FILE"
+        exit 1
+    else
+        echo -e "\tlogin successful\n" | tee -a "$LOG_FILE"
+    fi
+}
+
+
+####################
+# start of execution
+####################
+clear
+parse_options $@
+#picocom -b 115200 /dev/ttyUSB0
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a "$LOG_FILE"
+echo "start system boot test" | tee -a "$LOG_FILE"
+echo "pls insert the power cable into grey_board(20s)"
+
+while [ "$REBOOT_NUM" -ge "0" ]; do
+    while [ "$RESET_NUM" -gt "0" ]; do
+        test_bootloader
+        if [ "$RESET_NUM" -eq "0" -o "$ALLOW_RESET" == "n" ]; then
+            break
+        fi
+        echo "reset" >> $TTY
+        RESET_NUM=$((RESET_NUM - 1))
+    done
+
+    start_os_boot
+    test_login
+
+    if [ "$REBOOT_NUM" -eq "0" ]; then
+            break
+    fi
+    echo >> $TTY
+    echo "reboot" >> $TTY
+    REBOOT_NUM=$((REBOOT_NUM - 1))
+    ALLOW_RESET="n"
+done
+
+echo -e "test done" | tee -a "$LOG_FILE"
+echo "----------------------------" | tee -a "$LOG_FILE"
