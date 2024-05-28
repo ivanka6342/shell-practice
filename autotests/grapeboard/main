@@ -6,6 +6,7 @@ LOG_FILE="./results.log"
 test_list=`cat $TEST_LIST`
 
 while IFS= read -r it; do
+    echo "it = $it"
     sleep 1
     if [ -f "./${it%% *}" ]; then
         echo "start test : ${it%% *}" # >> "$LOG_FILE"
