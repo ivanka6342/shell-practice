@@ -1,1 +1,2 @@
 test1_os_boot -r 10
+test3_sd_card -h

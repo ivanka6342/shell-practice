@@ -1,0 +1,58 @@
+#!/bin/bash
+
+LOG_FILE="./results.log"
+PROMPT="root@trustbox:~#"
+TTY="/dev/ttyUSB0"
+
+
+get_mmc_info() {
+    tmp_f=`mktemp /tmp/mmc_data.XXXXX`
+    awk 'BEGIN {
+            system("cat '$TTY' & echo $!")
+
+            system("echo \"fdisk -l | grep --color=never -A 5 'Disk.*sda'\" >> '$TTY'")
+            system("sync")
+        }' > $tmp_f
+
+    sleep 2
+    mmc_info=`cat $tmp_f`
+    kill -9 `head -n 1 $tmp_f`
+    rm $tmp_f
+}
+
+parse_mmc_info() {
+    echo "$mmc_info"
+    echo "$mmc_info" | while IFS= read -r it; do
+        case $it in
+            # name, size
+            *Disk*dev*)
+                a="${it%%,*}"
+                echo -e "\t${a##*Disk }" | tee -a $LOG_FILE
+                ;;
+            # PTTYPE
+            *Disklabel*)
+                echo -e "\t$it" | tee -a $LOG_FILE
+                ;;
+            *--*)
+                echo | tee -a $LOG_FILE
+                ;;
+        esac
+    done
+}
+
+
+####################
+# start of execution
+####################
+clear
+stty min 1 time 0 line 0 -brkint -icrnl -imaxbel -opost -isig -icanon -iexten -echo clocal cread cs8 -cstopb -parenb -F $TTY speed 115200
+echo "----------------------------" | tee -a $LOG_FILE
+echo "start sd-card test" | tee -a "$LOG_FILE"
+echo -e '\x03\n' > "$TTY"
+
+get_mmc_info
+parse_mmc_info
+
+echo
+echo "test done" | tee -a $LOG_FILE
+echo "----------------------------" | tee -a $LOG_FILE
